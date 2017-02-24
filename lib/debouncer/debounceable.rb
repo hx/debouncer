@@ -25,7 +25,7 @@ class Debouncer
         d.reducer do |old, args, id|
           case reduce_with
             when Symbol
-              debouncing_instance(name, id).__send__ reduce_with, old, args
+              debouncing_instances(name)[id].__send__ reduce_with, old, args
             when Proc
               reduce_with[old, args, id]
             else
@@ -38,9 +38,11 @@ class Debouncer
         alias_method :#{immediate}, :#{name}
 
         def #{name}(*args)
-          id = #{group_by}
-          #{self.name}.debouncing_instance :#{name}, id, self
+          id                 = #{group_by}
+          instance_cache     = #{self.name}.debouncing_instances(:#{name})
+          instance_cache[id] = self
           #{self.name}.debouncer_for_method(:#{name}).debounce(id, *args) { |*args| #{immediate} *args }
+          instance_cache.delete id
         end
 
         def flush_#{name}
@@ -58,17 +60,11 @@ class Debouncer
     end
 
     def debouncer_for_method(name, delay = 0, &block)
-      @method_debouncers       ||= {}
-      @method_debouncers[name] ||= Debouncer.new(delay, &block)
+      (@method_debouncers ||= {})[name] ||= Debouncer.new(delay, &block)
     end
 
-    def debouncing_instance(method, id, instance = nil)
-      hash = (@debouncing_instances ||= {})[method] ||= {}
-      if instance
-        hash[id] = instance
-      else
-        hash[id]
-      end
+    def debouncing_instances(name)
+      (@debouncing_instances ||= {})[name] ||= {}
     end
   end
 end
