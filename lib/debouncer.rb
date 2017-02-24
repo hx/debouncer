@@ -41,7 +41,7 @@ class Debouncer
         thread[:run_at] = Time.now + @delay
       end
     end or
-        yield args
+        yield *args
     self
   end
 
@@ -69,7 +69,7 @@ class Debouncer
     until exclusively { (thread[:run_at] <= Time.now).tap { |ready| @timeouts.delete id if ready } }
       sleep [thread[:run_at] - Time.now, 0].max
     end
-    yield thread[:args]
+    yield *thread[:args]
   rescue => ex
     @timeouts.reject! { |_, v| v == thread }
     (rescuer = @rescuers.find { |klass, _| ex.is_a? klass }) && rescuer.last[ex]
@@ -81,9 +81,9 @@ class Debouncer
     old_args = thread[:args]
     if @reducer
       initial, reducer = @reducer
-      reducer[thread[:has_args] ? old_args : initial, *new_args].tap { thread[:has_args] = true }
+      reducer[old_args || initial || [], *new_args]
     else
-      new_args.empty? ? old_args : new_args.first
+      new_args.empty? ? old_args : new_args
     end
   end
 
