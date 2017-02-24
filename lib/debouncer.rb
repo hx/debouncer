@@ -11,7 +11,7 @@ class Debouncer
     block.arity.zero? ? instance_exec(&block) : yield(self) if block
   end
 
-  def reducer(initial = nil, &block)
+  def reducer(*initial, &block)
     @reducer = [initial, block]
     self
   end
@@ -30,18 +30,43 @@ class Debouncer
     raise ArgumentError, 'Expected a block' unless block
     exclusively do
       thread = @timeouts[id] ||= new_thread { begin_delay id, &block }
-      args   = reduce_args(thread, args)
-      if @limiter && @limiter[args]
+      @flush = [id]
+      args   = reduce_args(thread, args, id)
+      if (@limiter && !@limiter[*args]) || @flush == true
         thread.kill
         @timeouts.delete id
         @threads.delete thread
-        nil
+        @flush = false
       else
         thread[:args]   = args
         thread[:run_at] = Time.now + @delay
       end
     end or
         yield *args
+    self
+  end
+
+  def flush(*args)
+    if args.empty?
+      if @lock.owned?
+        @flush = true
+      else
+        flush @timeouts.keys.first while @timeouts.any?
+      end
+    else
+      id = args.first
+      if @lock.owned? && @flush == [id]
+        @flush = true
+      else
+        dead = exclusively do
+          if (thread = @timeouts.delete(id))
+            thread.kill
+            @threads.delete thread
+          end
+        end
+        dead[:block].call *dead[:args] if dead
+      end
+    end
     self
   end
 
@@ -64,7 +89,8 @@ class Debouncer
 
   private
 
-  def begin_delay(id)
+  def begin_delay(id, &block)
+    thread[:block] = block
     sleep @delay
     until exclusively { (thread[:run_at] <= Time.now).tap { |ready| @timeouts.delete id if ready } }
       sleep [thread[:run_at] - Time.now, 0].max
@@ -77,11 +103,11 @@ class Debouncer
     exclusively { @threads.delete thread }
   end
 
-  def reduce_args(thread, new_args)
+  def reduce_args(thread, new_args, id)
     old_args = thread[:args]
     if @reducer
       initial, reducer = @reducer
-      reducer[old_args || initial || [], *new_args]
+      reducer[old_args || initial || [], new_args, id]
     else
       new_args.empty? ? old_args : new_args
     end

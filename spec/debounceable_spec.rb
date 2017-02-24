@@ -4,23 +4,41 @@ describe Debouncer::Debounceable do
 
     attr_accessor :callback
 
-    def run_callback
-      callback.call
+    def run_callback(*args)
+      callback.call *args
     end
-    debounce :run_callback, 0.1, rescue_with: :show_ex
+    debounce :run_callback, 0.1,
+             rescue_with: :show_ex,
+             reduce_with: :reducer
 
     def self.show_ex(ex)
-      puts "#{ex.class} #{ex.message}\n #{ex.backtrace.join "\n  "}"
+      puts "#{ex.class} #{ex.message}\n  #{ex.backtrace.join "\n  "}"
+    end
+
+    def reducer(old, new)
+      sum = (old.first || 0) + new.first
+      flush_run_callback unless sum < 10
+      [sum]
     end
   end
 
-  it 'delays execution of a method' do
-    fired = false
-    sample = SampleClass.new
-    sample.callback = -> { fired = true }
-    sample.run_callback
-    expect(fired).to be false
+  subject { SampleClass.new }
+
+  it 'provides means to join background threads' do
+    result = nil
+    subject.callback = -> x { result = x }
+    subject.run_callback 7
+    expect(result).to be nil
     SampleClass.join_run_callback
-    expect(fired).to be true
+    expect(result).to be 7
+  end
+
+  it 'can flush from within a reducer' do
+    result = nil
+    subject.callback = -> x { result = x }
+    subject.run_callback 7
+    expect(result).to be nil
+    subject.run_callback 5
+    expect(result).to be 12
   end
 end
