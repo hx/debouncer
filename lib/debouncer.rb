@@ -1,23 +1,34 @@
+require 'forwardable'
+
 require 'debouncer/version'
+require 'debouncer/group'
 
 class Debouncer
+  extend Forwardable
+
+  DEFAULT_GROUP = Object.new
+
+  attr_reader :delay
+
   def initialize(delay, &block)
-    raise ArgumentError, 'Expected a number' unless delay.is_a? Numeric
-    @delay    = delay
+    self.delay = delay
+    raise ArgumentError, 'Expected a block' unless block
     @timeouts = {}
     @threads  = []
-    @lock     = Mutex.new
     @rescuers = {}
-    block.arity.zero? ? instance_exec(&block) : yield(self) if block
+    @block    = block
+    @lock     = Mutex.new
   end
+
+  def delay=(delay)
+    raise ArgumentError, "Expected Numeric, but got #{delay.class.name}" unless delay.is_a? Numeric
+    @delay = delay
+  end
+
+  delegate arity: :@block
 
   def reducer(*initial, &block)
-    @reducer = [initial, block]
-    self
-  end
-
-  def limiter(&block)
-    @limiter = block
+    @reducer = [initial, block || initial.pop]
     self
   end
 
@@ -26,23 +37,43 @@ class Debouncer
     self
   end
 
-  def debounce(id = nil, *args, &block)
-    raise ArgumentError, 'Expected a block' unless block
+  def group(id)
+    Group.new self, id
+  end
+
+  def call(*args, &block)
+    call_with_id DEFAULT_GROUP, *args, &block
+  end
+
+  def call_with_id(id, *args, &block)
+    args << block if block
+    thread = nil
     exclusively do
-      thread = @timeouts[id] ||= new_thread { begin_delay id, &block }
-      @flush = [id]
-      args   = reduce_args(thread, args, id)
-      if (@limiter && !@limiter[*args]) || @flush == true
+      thread        = @timeouts[id] ||= new_thread { begin_delay id }
+      @flush        = [id]
+      old_args      = thread[:args]
+      thread[:args] =
+          if @reducer
+            initial, reducer = @reducer
+            old_args ||= initial || []
+            if reducer.is_a? Symbol
+              old_args.__send__ reducer, args
+            elsif reducer.respond_to? :call
+              reducer.call old_args, args, id
+            end
+          else
+            args.empty? ? old_args : args
+          end
+      if @flush == true
         thread.kill
         @timeouts.delete id
         @threads.delete thread
         @flush = false
       else
-        thread[:args]   = args
         thread[:run_at] = Time.now + @delay
       end
     end or
-        yield *args
+        run_block thread
     self
   end
 
@@ -64,7 +95,7 @@ class Debouncer
             @threads.delete thread
           end
         end
-        dead[:block].call *dead[:args] if dead
+        run_block dead if dead
       end
     end
     self
@@ -87,6 +118,14 @@ class Debouncer
     "#<#{self.class}:0x#{'%014x' % (object_id << 1)} delay: #{@delay} timeouts: #{@timeouts.count} threads: #{@threads.count}>"
   end
 
+  def to_proc
+    -> *args, &block { call *args, &block }
+  end
+
+  def sleeping?
+    @timeouts.length.nonzero?
+  end
+
   private
 
   def begin_delay(id, &block)
@@ -95,7 +134,7 @@ class Debouncer
     until exclusively { (thread[:run_at] <= Time.now).tap { |ready| @timeouts.delete id if ready } }
       sleep [thread[:run_at] - Time.now, 0].max
     end
-    yield *thread[:args]
+    run_block thread
   rescue => ex
     @timeouts.reject! { |_, v| v == thread }
     (rescuer = @rescuers.find { |klass, _| ex.is_a? klass }) && rescuer.last[ex]
@@ -103,14 +142,8 @@ class Debouncer
     exclusively { @threads.delete thread }
   end
 
-  def reduce_args(thread, new_args, id)
-    old_args = thread[:args]
-    if @reducer
-      initial, reducer = @reducer
-      reducer[old_args || initial || [], new_args, id]
-    else
-      new_args.empty? ? old_args : new_args
-    end
+  def run_block(thread)
+    @block.call *thread[:args]
   end
 
   def new_thread(*args, &block)

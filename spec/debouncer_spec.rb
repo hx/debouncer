@@ -4,27 +4,35 @@ RSpec.describe Debouncer do
   end
 
   it 'can be flushed from a reducer' do
-    d = Debouncer.new(2)
+    result = nil
+    d = Debouncer.new(2) { |x| result = x }
     d.reducer 0 do |a, b|
       sum = a.first + b.first
       d.flush if sum > 10
       [sum]
     end
-    result = nil
-    d.debounce(nil, 4) { |x| result = x }
+    d.call 4
     expect(result).to be nil
-    d.debounce(nil, 8) { |x| result = x }
+    d.call 8
     expect(result).to eq 12
   end
 
-  it 'can be flushed by a limiter' do
-    d = Debouncer.new(2)
-    d.reducer(0) { |a, b| [a.first + b.first] }
-    d.limiter { |a| a < 10 }
+  it 'accepts a symbol as a reducer' do
     result = nil
-    d.debounce(nil, 4) { |x| result = x }
-    expect(result).to be nil
-    d.debounce(nil, 8) { |x| result = x }
-    expect(result).to eq 12
+    d = Debouncer.new(30) { |*args| result = args }
+    d.reducer 3, :+
+    d.call 4
+    d.call 5
+    d.flush
+    expect(result).to eq [3, 4, 5]
+
+    result = nil
+    d.reducer :|
+    d.call :a
+    d.call :b
+    d.call :a
+    d.call :c, :b, :a
+    d.flush
+    expect(result.to_a).to eq [:a, :b, :c]
   end
 end
