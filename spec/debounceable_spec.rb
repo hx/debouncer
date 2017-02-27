@@ -8,20 +8,20 @@ describe Debouncer::Debounceable do
       callback.call *args
     end
 
-    debounce :run_callback, 0.2,
-             rescue_with: :show_ex,
-             reduce_with: :reducer,
-             grouped:     true
-
     def show_ex(ex)
       puts "#{ex.class} #{ex.message}\n  #{ex.backtrace.join "\n  "}"
     end
 
-    def reducer(old, new, _)
+    def reducer(old, new)
       sum = (old.first || 0) + new.first
       flush_run_callback unless sum < 10
       [sum]
     end
+
+    debounce :run_callback, 0.2,
+             rescue_with: :show_ex,
+             reduce_with: :reducer,
+             grouped:     true
   end
 
   subject { SampleClass.new }

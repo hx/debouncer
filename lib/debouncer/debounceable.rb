@@ -15,8 +15,14 @@ class Debouncer
       debouncer = "@#{base_name}#{SUFFIXES[suffix]}_debouncer"
       extras    = ''
       if reduce_with
+        arity    = __send__(class_method ? :method : :instance_method, reduce_with).arity
+        expected = grouped ? 2..3 : 2
+        unless arity < 0 || expected === arity
+          raise ArgumentError, 'Expected %s%s%s to accept %s arguments, but it accepts %s.' %
+              [self.name, class_method ? '.' : '#', reduce_with, expected, arity]
+        end
         if grouped
-          extras << ".reducer { |old, new| [new.first, *self.#{reduce_with}(old[1..-1] || [], new[1..-1], new.first)] }"
+          extras << ".reducer { |old, new| [new.first, *self.#{reduce_with}(old[1..-1] || [], new[1..-1]#{', new.first' unless arity == 2})] }"
         else
           extras << ".reducer { |old, new| self.#{reduce_with} old, new }"
         end
