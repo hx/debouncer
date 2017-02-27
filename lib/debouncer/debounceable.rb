@@ -1,5 +1,3 @@
-require 'debouncer'
-
 class Debouncer
   module Debounceable
     SUFFIXES = {
@@ -16,8 +14,8 @@ class Debouncer
       immediate = "#{base_name}_immediately#{suffix}"
       debouncer = "@#{base_name}#{SUFFIXES[suffix]}_debouncer"
       extras    = ''
-      extras    << ".reducer { |old, new| self.#{reduce_with} old, new }" if :reduce_with
-      extras    << ".rescuer { |ex| self.#{rescue_with} ex }" if :rescue_with
+      extras    << ".reducer { |old, new| self.#{reduce_with} old, new }" if reduce_with
+      extras    << ".rescuer { |ex| self.#{rescue_with} ex }" if rescue_with
 
       class_eval <<-RUBY, __FILE__, __LINE__ + 1
         #{'class << self' if class_method}

@@ -1,5 +1,3 @@
-require 'debouncer/inspection'
-
 class Debouncer
   class Group
     include Inspection

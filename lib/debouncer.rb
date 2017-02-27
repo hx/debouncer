@@ -1,6 +1,7 @@
 require 'debouncer/version'
-require 'debouncer/group'
 require 'debouncer/inspection'
+require 'debouncer/group'
+require 'debouncer/debounceable'
 
 class Debouncer
   include Inspection
@@ -52,7 +53,7 @@ class Debouncer
     args << block if block
     thread = nil
     exclusively do
-      thread        = @timeouts[id] ||= new_thread { begin_delay id }
+      thread        = @timeouts[id] ||= new_thread { begin_delay id, args }
       @flush        = [id]
       old_args      = thread[:args]
       thread[:args] =
@@ -136,8 +137,9 @@ class Debouncer
 
   private
 
-  def begin_delay(id, &block)
-    thread[:block] = block
+  def begin_delay(id, args)
+    thread[:run_at] = Time.now + @delay
+    thread[:args] ||= args
     sleep @delay
     until exclusively { (thread[:run_at] <= Time.now).tap { |ready| @timeouts.delete id if ready } }
       sleep [thread[:run_at] - Time.now, 0].max
