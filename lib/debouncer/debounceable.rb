@@ -37,6 +37,10 @@ class Debouncer
           #{debouncer}.flush *args if #{debouncer}
         end
 
+        def flush_and_join_#{name}(*args)
+          #{debouncer}.flush! *args if #{debouncer}
+        end
+
         def join_#{name}(*args)
           #{debouncer}.join *args if #{debouncer}
         end

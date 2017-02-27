@@ -8,12 +8,14 @@ RSpec.describe Debouncer do
     d = Debouncer.new(2) { |x| result = x }
     d.reducer 0 do |a, b|
       sum = a.first + b.first
-      d.flush if sum > 10
+      d.flush! if sum > 10
       [sum]
     end
     d.call 4
+    expect(d).to be_sleeping
     expect(result).to be nil
     d.call 8
+    expect(d).not_to be_sleeping
     expect(result).to eq 12
   end
 
@@ -23,7 +25,7 @@ RSpec.describe Debouncer do
     d.reducer 3, :+
     d.call 4
     d.call 5
-    d.flush
+    d.flush!
     expect(result).to eq [3, 4, 5]
 
     result = nil
@@ -32,7 +34,7 @@ RSpec.describe Debouncer do
     d.call :b
     d.call :a
     d.call :c, :b, :a
-    d.flush
+    d.flush!
     expect(result.to_a).to eq [:a, :b, :c]
   end
 
@@ -42,9 +44,9 @@ RSpec.describe Debouncer do
     d.group(:a).call :foo
     d.group(:b).call :bar
     expect(results).to eq []
-    d.group(:b).flush
+    d.group(:b).flush!
     expect(results).to eq [[:bar]]
-    d.group(:a).flush
+    d.group(:a).flush!
     expect(results).to eq [[:bar], [:foo]]
   end
 

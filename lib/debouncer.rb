@@ -51,7 +51,7 @@ class Debouncer
 
   def call_with_id(id, *args, &block)
     args << block if block
-    thread = nil
+    run_thread = nil
     exclusively do
       thread        = @timeouts[id] ||= new_thread { begin_delay id, args }
       @flush        = [id]
@@ -68,35 +68,42 @@ class Debouncer
           else
             args.empty? ? old_args : args
           end
-      if @flush == true
+      if @flush.is_a? Array
+        thread[:run_at] = Time.now + @delay
+      else
         thread.kill
         @timeouts.delete id
         @threads.delete thread
+        run_thread = new_thread { run_block thread }
+        run_thread = nil unless @flush
         @flush = false
-      else
-        thread[:run_at] = Time.now + @delay
       end
-    end or
-        run_block thread
+    end
+    run_thread.join if run_thread
     self
   end
 
-  def flush(id = EMPTY)
+  def flush(id = EMPTY, and_join: false)
     if @lock.owned?
       raise ArgumentError, 'You cannot flush other groups from inside a reducer' unless id == EMPTY || [id] == @flush
-      @flush = true
+      @flush = and_join
     elsif id == EMPTY
       flush @timeouts.keys.first while @timeouts.any?
     else
-      dead = exclusively do
-        if (thread = @timeouts.delete(id))
-          thread.kill
-          @threads.delete thread
+      thread = exclusively do
+        if (old_thread = @timeouts.delete(id))
+          old_thread.kill
+          @threads.delete old_thread
+          new_thread { run_block old_thread }
         end
       end
-      run_block dead if dead
+      thread.join if thread
     end
     self
+  end
+
+  def flush!(*args)
+    flush *args, and_join: true
   end
 
   def join(id = EMPTY, kill_first: false)

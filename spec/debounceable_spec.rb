@@ -8,7 +8,7 @@ describe Debouncer::Debounceable do
       callback.call *args
     end
 
-    debounce :run_callback, 0.1,
+    debounce :run_callback, 0.2,
              rescue_with: :show_ex,
              reduce_with: :reducer,
              grouped:     true
@@ -41,6 +41,7 @@ describe Debouncer::Debounceable do
     subject.run_callback nil, 7
     expect(result).to be nil
     subject.run_callback nil, 7
+    sleep 0.1
     expect(result).to be 14
   end
 end

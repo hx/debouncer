@@ -114,6 +114,8 @@ def combine_messages(memo, messages)
 end
 ```
 
+If you're using grouping, calling `flush_send_warning` followed by `join_send_warning` won't have the effect you'd expect. When a group begins execution, the group's queue is cleared and a new queue is created, so joining that queue won't join the already-running thread. Instead, `flush_and_join_send_message` serves this purpose.
+
 Finally, you can also debounce class/module methods using the `mdebounce` method. If you want to combine calls on various instances of a class, a sound pattern is to debounce a class method and have instances call it. For example, consider broadcasting data changes to browsers, where you want to group changes to the same model together into single broadcasts:
 
 ```ruby
@@ -191,6 +193,16 @@ d.group(:messages).join
 
 # This will join all threads:
 d.join
+```
+
+As mentioned in the previous section, calling `flush` followed by `join` on a group won't join the thread that started executing when you called `flush`.
+
+```ruby
+# This flushes and then joins an empty queue, returning instantly:
+d.group(:messages).flush.join
+
+# This flushes and waits for messages to be sent:
+d.group(:messages).flush!
 ```
 
 ## Development
