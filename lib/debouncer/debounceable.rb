@@ -2,69 +2,51 @@ require 'debouncer'
 
 class Debouncer
   module Debounceable
-    def debounce(name, delay, rescue_with: nil, group_by: :object_id, reduce_with: nil)
+    SUFFIXES = {
+        '?' => '_predicate',
+        '!' => '_dangerous',
+        '=' => '_assignment'
+    }
+    def debounce(name, delay, rescue_with: nil, grouped: false, reduce_with: nil, class_method: false)
       name =~ /^(\w+)([?!=]?)$/ or
           raise ArgumentError, 'Invalid method name'
 
       base_name = $1
       suffix    = $2
       immediate = "#{base_name}_immediately#{suffix}"
-
-      debouncer_for_method name, delay do |d|
-        d.rescuer do |ex|
-          case rescue_with
-            when Symbol
-              __send__ rescue_with, ex
-            when Proc
-              rescue_with[ex]
-            else
-              # Silent failure
-          end
-        end if rescue_with
-
-        d.reducer do |old, args, id|
-          case reduce_with
-            when Symbol
-              debouncing_instances(name)[id].__send__ reduce_with, old, args
-            when Proc
-              reduce_with[old, args, id]
-            else
-              raise ArgumentError
-          end
-        end if reduce_with
-      end
+      debouncer = "@#{base_name}#{SUFFIXES[suffix]}_debouncer"
+      extras    = ''
+      extras    << ".reducer { |old, new| self.#{reduce_with} old, new }" if :reduce_with
+      extras    << ".rescuer { |ex| self.#{rescue_with} ex }" if :rescue_with
 
       class_eval <<-RUBY, __FILE__, __LINE__ + 1
+        #{'class << self' if class_method}
+      
         alias_method :#{immediate}, :#{name}
 
-        def #{name}(*args)
-          id                 = #{group_by}
-          instance_cache     = #{self.name}.debouncing_instances(:#{name})
-          instance_cache[id] = self
-          #{self.name}.debouncer_for_method(:#{name}).debounce(id, *args) { |*args| #{immediate} *args }
-          instance_cache.delete id
+        def #{name}(*args, &block)
+          #{debouncer} ||= ::Debouncer.new(#{delay}) { |*args| self.#{immediate} *args }#{extras}
+          #{debouncer}#{'.group(args.first)' if grouped}.call *args, &block
         end
 
-        def flush_#{name}
-          #{self.name}.debouncer_for_method(:#{name}).flush #{group_by}
+        def flush_#{name}(*args)
+          #{debouncer}.flush *args if #{debouncer}
         end
 
-        def self.join_#{name}
-          debouncer_for_method(:#{name}).join
+        def join_#{name}(*args)
+          #{debouncer}.join *args if #{debouncer}
         end
 
-        def self.cancel_#{name}
-          debouncer_for_method(:#{name}).kill
+        def cancel_#{name}(*args)
+          #{debouncer}.kill *args if #{debouncer}
         end
+
+        #{'end' if class_method}
       RUBY
     end
 
-    def debouncer_for_method(name, delay = 0, &block)
-      (@method_debouncers ||= {})[name] ||= Debouncer.new(delay, &block)
-    end
-
-    def debouncing_instances(name)
-      (@debouncing_instances ||= {})[name] ||= {}
+    def mdebounce(name, delay, **opts)
+      debounce name, delay, class_method: true, **opts
     end
   end
 end

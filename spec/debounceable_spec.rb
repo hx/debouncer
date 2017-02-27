@@ -7,11 +7,13 @@ describe Debouncer::Debounceable do
     def run_callback(*args)
       callback.call *args
     end
+
     debounce :run_callback, 0.1,
              rescue_with: :show_ex,
-             reduce_with: :reducer
+             reduce_with: :reducer,
+             grouped:     true
 
-    def self.show_ex(ex)
+    def show_ex(ex)
       puts "#{ex.class} #{ex.message}\n  #{ex.backtrace.join "\n  "}"
     end
 
@@ -29,7 +31,7 @@ describe Debouncer::Debounceable do
     subject.callback = -> x { result = x }
     subject.run_callback 7
     expect(result).to be nil
-    SampleClass.join_run_callback
+    subject.join_run_callback
     expect(result).to be 7
   end
 
@@ -38,7 +40,7 @@ describe Debouncer::Debounceable do
     subject.callback = -> x { result = x }
     subject.run_callback 7
     expect(result).to be nil
-    subject.run_callback 5
-    expect(result).to be 12
+    subject.run_callback 7
+    expect(result).to be 14
   end
 end
