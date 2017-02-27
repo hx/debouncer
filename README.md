@@ -1,4 +1,4 @@
-# Debouncer
+# Debouncer [![Build Status](https://travis-ci.org/hx/debouncer.svg?branch=master)](https://travis-ci.org/hx/debouncer)
 
 Background thread debouncing for Ruby.
 
