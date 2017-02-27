@@ -1,12 +1,9 @@
-require 'forwardable'
-
 require 'debouncer/version'
 require 'debouncer/group'
 
 class Debouncer
-  extend Forwardable
-
   DEFAULT_GROUP = Object.new
+  EMPTY         = Object.new
 
   attr_reader :delay
 
@@ -25,7 +22,9 @@ class Debouncer
     @delay = delay
   end
 
-  delegate arity: :@block
+  def arity
+    @block.arity
+  end
 
   def reducer(*initial, &block)
     @reducer = [initial, block || initial.pop]
@@ -44,6 +43,7 @@ class Debouncer
   def call(*args, &block)
     call_with_id DEFAULT_GROUP, *args, &block
   end
+  alias_method :[], :call
 
   def call_with_id(id, *args, &block)
     args << block if block
@@ -55,7 +55,7 @@ class Debouncer
       thread[:args] =
           if @reducer
             initial, reducer = @reducer
-            old_args ||= initial || []
+            old_args         ||= initial || []
             if reducer.is_a? Symbol
               old_args.__send__ reducer, args
             elsif reducer.respond_to? :call
@@ -77,41 +77,41 @@ class Debouncer
     self
   end
 
-  def flush(*args)
-    if args.empty?
-      if @lock.owned?
-        @flush = true
-      else
-        flush @timeouts.keys.first while @timeouts.any?
-      end
+  def flush(id = EMPTY)
+    if @lock.owned?
+      raise ArgumentError, 'You cannot flush other groups from inside a reducer' unless id == EMPTY || [id] == @flush
+      @flush = true
+    elsif id == EMPTY
+      flush @timeouts.keys.first while @timeouts.any?
     else
-      id = args.first
-      if @lock.owned? && @flush == [id]
-        @flush = true
-      else
-        dead = exclusively do
-          if (thread = @timeouts.delete(id))
-            thread.kill
-            @threads.delete thread
-          end
+      dead = exclusively do
+        if (thread = @timeouts.delete(id))
+          thread.kill
+          @threads.delete thread
         end
-        run_block dead if dead
       end
+      run_block dead if dead
     end
     self
   end
 
-  def join(kill_first = false)
-    while (thread = exclusively { @threads.find &:alive? })
+  def join(id = EMPTY, kill_first: false)
+    if id == EMPTY
+      while (thread = exclusively { @threads.find &:alive? })
+        thread.kill if kill_first
+        thread.join
+      end
+      exclusively { [@threads, @timeouts].each &:clear } if kill_first
+    elsif (thread = exclusively { @timeouts.delete id })
+      @threads.delete thread
       thread.kill if kill_first
       thread.join
     end
-    exclusively { [@threads, @timeouts].each &:clear } if kill_first
     self
   end
 
-  def kill
-    join true
+  def kill(id = EMPTY)
+    join id, kill_first: true
   end
 
   def inspect
@@ -119,7 +119,7 @@ class Debouncer
   end
 
   def to_proc
-    -> *args, &block { call *args, &block }
+    method(:call).to_proc
   end
 
   def sleeping?

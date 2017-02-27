@@ -12,11 +12,19 @@ class Debouncer
     end
 
     def to_proc
-      -> *args, &block { call *args, &block }
+      method(:call).to_proc
     end
 
     def flush
       @debouncer.flush @id
+    end
+
+    def join
+      @debouncer.join @id
+    end
+
+    def kill
+      @debouncer.kill @id
     end
   end
 end

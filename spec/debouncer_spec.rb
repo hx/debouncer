@@ -35,4 +35,26 @@ RSpec.describe Debouncer do
     d.flush
     expect(result.to_a).to eq [:a, :b, :c]
   end
+
+  it 'can group calls' do
+    results = []
+    d = Debouncer.new(30) { |*args| results << args }
+    d.group(:a).call :foo
+    d.group(:b).call :bar
+    expect(results).to eq []
+    d.group(:b).flush
+    expect(results).to eq [[:bar]]
+    d.group(:a).flush
+    expect(results).to eq [[:bar], [:foo]]
+  end
+
+  it 'can kill all slept threads' do
+    d = Debouncer.new(5) { }
+    d.call
+    expect(d.sleeping?).to be 1
+    d.group(:another).call
+    expect(d.sleeping?).to be 2
+    d.kill
+    expect(d).not_to be_sleeping
+  end
 end
