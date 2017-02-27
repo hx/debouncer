@@ -1,7 +1,10 @@
 require 'debouncer/version'
 require 'debouncer/group'
+require 'debouncer/inspection'
 
 class Debouncer
+  include Inspection
+
   DEFAULT_GROUP = Object.new
   EMPTY         = Object.new
 
@@ -114,8 +117,8 @@ class Debouncer
     join id, kill_first: true
   end
 
-  def inspect
-    "#<#{self.class}:0x#{'%014x' % (object_id << 1)} delay: #{@delay} timeouts: #{@timeouts.count} threads: #{@threads.count}>"
+  def inspect_params
+    {delay: @delay, timeouts: @timeouts.count, threads: @threads.count}
   end
 
   def to_proc
@@ -124,6 +127,11 @@ class Debouncer
 
   def sleeping?
     @timeouts.length.nonzero?
+  end
+
+  def runs_at(id = DEFAULT_GROUP)
+    thread = @timeouts[id]
+    thread && thread[:run_at]
   end
 
   private

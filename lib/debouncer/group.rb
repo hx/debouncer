@@ -1,5 +1,9 @@
+require 'debouncer/inspection'
+
 class Debouncer
   class Group
+    include Inspection
+
     attr_reader :id, :debouncer
 
     def initialize(debouncer, id)
@@ -25,6 +29,10 @@ class Debouncer
 
     def kill
       @debouncer.kill @id
+    end
+
+    def inspect_params
+      {delay: @debouncer.delay, scheduled: @debouncer.runs_at(@id) || 'idle'}
     end
   end
 end
