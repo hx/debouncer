@@ -102,6 +102,8 @@ end
 
 The `combine_messages` method will be called whenever `send_warning` is called. The first argument is the last value it returned, or an empty array if this is the first call for the thread. The second argument is an array of the arguments supplied to `send_warning`. It should return an array of arguments that will ultimately be passed to the original method.
 
+If grouping is enabled, the first two arguments will not include the ID. Instead, it will be passed as the first argument. The reducer should not include the ID in the array it returns.
+
 A reducer method is a good place to call `flush_*` if you hit some sort of limit or threshold. Just remember to still return the array of arguments you want to call.
 
 ```ruby

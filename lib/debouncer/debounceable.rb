@@ -14,7 +14,13 @@ class Debouncer
       immediate = "#{base_name}_immediately#{suffix}"
       debouncer = "@#{base_name}#{SUFFIXES[suffix]}_debouncer"
       extras    = ''
-      extras    << ".reducer { |old, new| self.#{reduce_with} old, new }" if reduce_with
+      if reduce_with
+        if grouped
+          extras << ".reducer { |old, new| [new.first, *self.#{reduce_with}(old[1..-1] || [], new[1..-1], new.first)] }"
+        else
+          extras << ".reducer { |old, new| self.#{reduce_with} old, new }"
+        end
+      end
       extras    << ".rescuer { |ex| self.#{rescue_with} ex }" if rescue_with
 
       class_eval <<-RUBY, __FILE__, __LINE__ + 1

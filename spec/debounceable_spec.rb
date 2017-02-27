@@ -4,7 +4,7 @@ describe Debouncer::Debounceable do
 
     attr_accessor :callback
 
-    def run_callback(*args)
+    def run_callback(_, *args)
       callback.call *args
     end
 
@@ -17,7 +17,7 @@ describe Debouncer::Debounceable do
       puts "#{ex.class} #{ex.message}\n  #{ex.backtrace.join "\n  "}"
     end
 
-    def reducer(old, new)
+    def reducer(old, new, _)
       sum = (old.first || 0) + new.first
       flush_run_callback unless sum < 10
       [sum]
@@ -29,7 +29,7 @@ describe Debouncer::Debounceable do
   it 'provides means to join background threads' do
     result = nil
     subject.callback = -> x { result = x }
-    subject.run_callback 7
+    subject.run_callback nil, 7
     expect(result).to be nil
     subject.join_run_callback
     expect(result).to be 7
@@ -38,9 +38,9 @@ describe Debouncer::Debounceable do
   it 'can flush from within a reducer' do
     result = nil
     subject.callback = -> x { result = x }
-    subject.run_callback 7
+    subject.run_callback nil, 7
     expect(result).to be nil
-    subject.run_callback 7
+    subject.run_callback nil, 7
     expect(result).to be 14
   end
 end
