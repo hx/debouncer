@@ -20,130 +20,14 @@ Or install it yourself as:
 
 ## Usage
 
-### The agnostic way
-
-Make yourself a debouncer with a fixed delay:
-
-```ruby
-require 'debouncer'
-d = Debouncer.new(0.5) # Half a second
-```
-
-Hammer it as hard as you can:
-
-```ruby
-5.times { d.debounce { puts 'Hello!' } }
-sleep 1
-```
-
-You'll see "Hello!" after half a second. Debounced code runs on background threads, so without `sleep 1`, the program exits immediately and you don't get any output.
-
-A single debouncer is meant to serve an entire collection of consumers, so a unique thread is spawned for each identifier passed as the first argument to `debounce`:
-
-```ruby
-%w(Goodbye Hello Goodbye).each { |word| sleep(0.1) && d.debounce(word) { puts word } }
-sleep 1
-```
-
-The above will output `Hello` and then `Goodbye`, because the second 'Goodbye' replaces the first, but the 'Hello' in the middle is on its own thread.
-
-Subsequent arguments are passed to the block when it runs:
-
-```ruby
-d.debounce nil, 'hello' do |word|
-  puts word
-end
-sleep 1
-```
-
-You can use a *reducer* to combine the arguments of multiple calls into a single argument. The `reducer` method accepts 0 or more initial arguments, and yields two arguments whenever it receives a new set of args; the last return value of the block (or an array of the initial value if it's running for the first time), and an array of arguements passed to `debounce` (without the first ID argument). The block should return an array of arguments that is ultimately passed to the callback. 
-
-```ruby
-d.reducer('The') { |last_result, args| last_result + args }
-callback = -> *words { puts words.join(' ') }
-d.debounce nil, 'quick', 'brown', &callback
-d.debounce nil, 'fox', &callback
-sleep 1
-```
-
-You guessed it; `The quick brown fox` will be your eventual output. Because you're working with arrays inside your reducer, parentheses can be your friends if you're expecting a fixed number of arguments each time:
-
-```ruby
-d.reducer(0) { |(sum), (value)| [sum + value] }
-```
-
-If your debouncer is handling an accumulation of data (say building bulk insert queries or writing logs), you can force it to stop waiting and fire immediately, either from within your reducer or on your main thread:
-
-```ruby
-d.reducer Set.new do |(query_set), (query)|
-  query_set << query
-  d.flush if query_set.length >= 100
-  [query_set]
-end
-d.debounce(table.name, query) { |query_set| table.run_queries query_set }
-d.flush table.name if query.very_important?
-```
-
-Both uses of `flush` in the example above will only flush the thread for that table. If you call `flush` outside your reducer and without an ID, the debouncer will flush every waiting thread.
-
-The Ruby norm is for uncaught exceptions on background threads to fail silently. If you need to know what's going on back there (and you generally do), you can set yourself a *rescuer*:
-
-```ruby
-d.rescuer { |ex| STDERR.puts "#{ex.name} #{ex.message}\n  #{ex.backtrace.join "\n  "}" }
-```
-
-You can specify multiple rescuers for different exception types;
-
-```ruby
-d.rescuer(MinorError) { |ex| Logger.info ex.message }
-d.rescuer(RuntimeError) { |ex| puts ex.message }
-```
-
-If you like DSLs, you can set up reducers and rescuers when you make your debouncer:
-
-```ruby
-debouncer = Debouncer.new 0.5 do
-  rescuer { |ex| puts ex }
-  reducer { |a, b| a + b }
-end
-
-# Or if you need your scope:
-debouncer = Debouncer.new 0.5 do |d|
-  d.rescuer { |ex| puts ex }
-  d.reducer { |a, b| a + b }
-end
-```
-
-Most debouncer methods return `self`, so you can also do most things with chaining:
-
-```ruby
-debouncer = Debouncer.new(3).
-  rescuer { |ex| puts ex }.
-  reducer { |a, b| a + b }.
-  debounce { puts 'Look at all this stuff I chained together'}.
-  flush # Ok you'd never really do this :P
-```
-
-Finally, when writing specs etc you occasionally need to wait for your background threads and/or kill them off. `#join` and `#kill` should give you everything you need. For example, in RSpec:
-
-```ruby
-subject { MyClass.new }
-
-it 'does what I want' do
-  subject.thing_that_is_debounced
-  MyClass.debouncer.join
-  expect(subject.thing).to be_done
-end
-
-after { MyClass.debouncer.kill } # Stop any debounced threads from rolling into the next example
-```
-
 ### The easy way
 
-Generally, you just have an instance method you want to debounce. For this, we have `Debounceable`, which uses a `Debouncer` instance behind the scenes.
+Generally all you want to do is debounce an instance or class method. The `Debounceable` module gives you everything you need to get your bouncing methods debounced.
 
 ```ruby
-class Controller
+require 'debouncer/debounceable'
+
+class DangerZone
   extend Debouncer::Debounceable
   
   def send_warning
@@ -154,31 +38,158 @@ class Controller
 end
 ```
 
-This ensures we're not broadcasting our message more frequently than every 2 seconds.
+Each call to `send_warning` will be delayed on a background thread for 2 seconds before firing. If, during those two seconds, it's called again, the count-down will restart, and only one warning will actually be sent.
 
-All the features of `Debouncer` are available through generated methods:
+If you want to send your warning immediately, your original method has been given a suffix so you can still access it:
 
 ```ruby
-class LogWriter
+DangerZone.new.send_warning_immediately
+```
+
+A couple of methods have also been added to help work with background threads:
+
+```ruby
+dz = DangerZone.new
+
+dz.join_send_warning   # Wait for all warnings to be sent
+dz.flush_send_warning  # Send warnings immediately if any are waiting
+dz.cancel_send_warning # Cancel all waiting warnings
+```
+
+You can also debounce your calls in groups. By setting the `grouped: true` option, the first argument passed to the debounced method will be used to create a separate debouncer thread.
+ 
+```ruby
+class DangerZone
   extend Debouncer::Debounceable
   
-  def write_lines(lines)
-    Log.write_lines lines
+  def send_warning(message)
+    system "echo #{message.shellescape} | wall"
   end
   
-  debounce :write_lines, 2, 
-           reduce_with: :combine_lines, 
-           rescue_with: :handle_exception
-           
-  def combine_lines(current, new)
-    [current.first + new.first].tap do |result|
-      flush_write_lines if result.first.length >= 50
-    end
+  debounce :send_warning, 2, grouped: true
+end
+```
+
+Now, each unique message will have its own separate timeout. You can also pass group identifiers to `join_`, `flush_`, and `cancel_` methods to affect only those groups.
+
+Arguments are always passed to your original method intact, and by default, the last set of arguments in a group wins. If the example above didn't use grouping:
+
+```ruby
+d = DangerZone.new
+d.send_warning "We're going down!"
+d.send_warning "Spiders are attacking!"
+```
+
+The first warning would be replaced by the second when the method is eventually run.
+
+You can combine arguments to produce an end result however you like, using a reducer:
+
+```ruby
+class DangerZone
+  extend Debouncer::Debounceable
+  
+  def send_warning(*messages)
+    system "echo #{messages.map(&:shellescape).join ';'} | wall"
+  end
+  
+  debounce :send_warning, 2, reduce_with: :combine_messages
+  
+  def combine_messages(memo, messages)
+    memo + messages
   end
 end
 ```
 
-> TODO explain the rest
+The `combine_messages` method will be called whenever `send_warning` is called. The first argument is the last value it returned, or an empty array if this is the first call for the thread. The second argument is an array of the arguments supplied to `send_warning`. It should return an array of arguments that will ultimately be passed to the original method.
+
+A reducer method is a good place to call `flush_*` if you hit some sort of limit or threshold. Just remember to still return the array of arguments you want to call.
+
+```ruby
+def combine_messages(memo, messages)
+  result = memo + messages
+  flush_send_warning if result.length >= 5
+  result
+end
+```
+
+Finally, you can also debounce class/module methods using the `mdebounce` method. If you want to combine calls on various instances of a class, a sound pattern is to debounce a class method and have instances call it. For example, consider broadcasting data changes to browsers, where you want to group changes to the same model together into single broadcasts:
+
+```ruby
+class Record
+  extend Debouncer::Debounceable
+  
+  def self.broadcast(record_id)
+    look_up(record_id).broadcast
+  end
+  
+  mdebounce :broadcast, 0.5, grouped: true
+   
+  def save
+    write_to_database
+    Record.broadcast id
+  end
+end
+```
+
+In a web application, it's common for several instances of a model representing the same data record to existing during the course of a request. Debouncing the `broadcast` method on the instance wouldn't be effective, since each instance would have its own debouncer. By using a debounced class method, records are grouped by their ID instead of the Ruby objects that represent them.
+
+### The clean(er) way
+
+Under the hood, the `Debounceable` module uses a `Debouncer` instance as a thread controller. If you prefer not to have any extra methods defined on your class, you can use a `Debouncer` instance to achieve the same results.
+
+```ruby
+require 'debouncer'
+
+d = Debouncer.new(2) { |message| puts message }
+d.call 'I have arrived'
+```
+
+This will print the message "I have arrived!" after 2 seconds.
+
+Grouping is simple with a debouncer:
+
+```ruby
+d.group(:warnings).call 'I am about to arrive...'
+d.group(:alerts).call 'I have arrived!'
+d.group(:alerts).flush
+```
+
+When adding an argument reducer, you can also specify an initial value:
+
+```ruby
+d = Debouncer.new(2) { |*messages| puts messages }
+d.reducer('Here are some messages:', '') { |memo, messages| memo + messages }
+d.call "Evented Ruby isn't so bad"
+d.call "And it's threaded, too!"
+```
+
+After 2 seconds, the above code will print:
+
+```text
+Here are some messages:
+
+Evented Ruby isn't so bad
+And it's threaded, too!
+```
+
+If your reducer simply adds or OR's two arrays together, you can use a symbol instead:
+
+```ruby
+d.reducer 'Here are some messages:', '', :+
+```
+
+This will have the same result as the block form. If you use `:|` instead of `:+`, it will be like `memo | messages`, so messages won't be repeated between calls.
+
+Methods like `flush`, `kill`, and `join` are available too, and to exactly what you'd expect. You can call them directly on your debouncer, or after a `group(id)` call if you want to target a specific group.
+
+```ruby
+# These lines are equivalent:
+d.join :messages
+d.group(:messages).join
+
+# This will join all threads:
+d.join
+```
 
 ## Development
 
